@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+elope_dataset/
+
 # C extensions
 *.so
 
