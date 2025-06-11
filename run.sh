@@ -6,11 +6,32 @@ ZIP_FILE="elope_dataset.zip"
 ZENODO_URL="https://zenodo.org/record/15421707/files/elope_dataset.zip?download=1"
 PYTHON_SCRIPT="src/train.py"
 OUTPUT_DIR="outputs"
+CONDA_ENV_NAME="elope_env"
+PYTHON_VERSION="3.10" 
+
+function setup_conda_env() {
+    if conda info --envs | grep -q "$CONDA_ENV_NAME"; then
+        echo "Conda environment '$CONDA_ENV_NAME' already exists."
+    else
+        echo "Creating conda environment '$CONDA_ENV_NAME' with Python $PYTHON_VERSION..."
+        conda create -y -n "$CONDA_ENV_NAME" python="$PYTHON_VERSION"
+    fi
+
+    echo "Activating conda environment '$CONDA_ENV_NAME'..."
+    source "$(conda info --base)/etc/profile.d/conda.sh"
+    conda activate "$CONDA_ENV_NAME"
+
+    echo "Installing requirements from requirements.txt..."
+    pip install --upgrade pip
+    pip install -r requirements.txt
+
+    echo "Environment setup complete."
+}
+
 
 function download_dataset() {
     local DATA_DIR="${1:-$DEFAULT_DATA_DIR}"
     local N_VALID="${2:-$DEFAULT_N_VALID}"
-    local VENV_DIR=".venv"
 
     mkdir -p "$DATA_DIR"
     mkdir -p "$DATA_DIR/validation"
@@ -35,21 +56,6 @@ function download_dataset() {
     done
 
     echo "Validation set created in $VALID_DIR"
-
-    if [ ! -d "$VENV_DIR" ]; then
-        echo "Creating virtual environment in $VENV_DIR..."
-        python3 -m venv "$VENV_DIR"
-    else
-        echo "Virtual environment already exists."
-    fi
-
-    source "$VENV_DIR/bin/activate"
-    echo "Installing requirements from requirements.txt..."
-    pip install --upgrade pip
-    pip install -r requirements.txt
-    deactivate
-
-    echo "Environment setup complete."
 }
 
 function train() {
@@ -75,7 +81,11 @@ function test() {
     python "$PYTHON_SCRIPT" --mode test --folder_path "$DEFAULT_DATA_DIR/test" --checkpoint_path "$1" --batch_size 16 --use_range --output_dir "$OUTPUT_DIR/test"
 }
 
+
 case "$1" in
+    setup)
+        setup_conda_env
+        ;;
     download)
         download_dataset "$2" "$3"
         ;;
@@ -89,6 +99,6 @@ case "$1" in
         test "$2"
         ;;
     *)
-        echo "Usage: $0 {download [data_dir] [n_valid]|train|validate <checkpoint>|test <checkpoint>}"
+        echo "Usage: $0 {setup|download [data_dir] [n_valid]|train|validate <checkpoint>|test <checkpoint>}"
         exit 1
 esac
