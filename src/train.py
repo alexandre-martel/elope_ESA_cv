@@ -4,6 +4,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 from dataset import EventVelocityDataset
 from model import VelocityLightningModule
+from pytorch_lightning.callbacks import ModelCheckpoint
 import argparse
 import os
 
@@ -30,17 +31,28 @@ def main(args):
     logger = TensorBoardLogger(args.output_dir, name="velocity_model")
     print(f"[INFO] Logger initialized, saving to: {logger.log_dir} --------")
 
+     # Checkpoint callback: save every 5 epochs, keep only the latest
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=os.path.join(args.output_dir, "checkpoints"),
+        filename="epoch-{epoch:02d}",
+        save_top_k=1,  # Keep only the last checkpoint (highest epoch)
+        every_n_epochs=5,
+        verbose=True,
+    )
+
     trainer = pl.Trainer(
         max_epochs=args.epochs,
         logger=logger,
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
         default_root_dir=args.output_dir,
+        callbacks=[checkpoint_callback],
+        
     )
     print(f"[INFO] Trainer initialized on {'gpu' if torch.cuda.is_available() else 'cpu'}, starting training... --------") 
 
     
     if args.mode == "train":
-        trainer.fit(model, dataloader)
+        trainer.fit(model, dataloader, ckpt_path=args.resume_from_checkpoint if args.resume_from_checkpoint else None)
     elif args.mode == "validate":
         trainer.validate(model, dataloaders=dataloader)
     elif args.mode == "test":
@@ -51,6 +63,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train, validate or test velocity prediction model.")
+    parser.add_argument("--resume_from_checkpoint", type=str, default=None, help="Path to checkpoint to resume training")
     parser.add_argument("--mode", choices=["train", "validate", "test"], required=True, help="Mode to run")
     parser.add_argument("--folder_path", type=str, required=True, help="Dataset folder for train/validate/test")
     parser.add_argument("--output_dir", type=str, default="outputs", help="Folder to save logs, checkpoints, results")

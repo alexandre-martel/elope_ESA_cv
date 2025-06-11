@@ -59,8 +59,20 @@ function download_dataset() {
 }
 
 function train() {
-    echo "Starting training..."
-    python "$PYTHON_SCRIPT" --mode train --folder_path "$DEFAULT_DATA_DIR/train" --output_dir "$OUTPUT_DIR/train" --epochs 20 --batch_size 16 --use_range
+    local EPOCHS="${1:-20}"
+    echo "Starting training for $EPOCHS epochs..."
+    python "$PYTHON_SCRIPT" --mode train --folder_path "$DEFAULT_DATA_DIR/train" --output_dir "$OUTPUT_DIR/train" --epochs "$EPOCHS" --batch_size 16 --use_range
+}
+
+function resume() {
+    if [ -z "$1" ]; then
+        echo "Error: Please provide checkpoint path to resume training"
+        exit 1
+    fi
+    local CHECKPOINT="$1"
+    local EPOCHS="${2:-20}"
+    echo "Resuming training from checkpoint $CHECKPOINT for $EPOCHS epochs..."
+    python "$PYTHON_SCRIPT" --mode train --folder_path "$DEFAULT_DATA_DIR/train" --output_dir "$OUTPUT_DIR/train" --epochs "$EPOCHS" --batch_size 16 --use_range --resume_from_checkpoint "$CHECKPOINT"
 }
 
 function validate() {
@@ -82,6 +94,7 @@ function test() {
 }
 
 
+
 case "$1" in
     setup)
         setup_conda_env
@@ -90,7 +103,10 @@ case "$1" in
         download_dataset "$2" "$3"
         ;;
     train)
-        train
+        train "$2"
+        ;;
+    resume)
+        resume "$2" "$3"
         ;;
     validate)
         validate "$2"
@@ -99,6 +115,6 @@ case "$1" in
         test "$2"
         ;;
     *)
-        echo "Usage: $0 {setup|download [data_dir] [n_valid]|train|validate <checkpoint>|test <checkpoint>}"
+        echo "Usage: $0 {setup|download [data_dir] [n_valid]|train [epochs]|resume <checkpoint> [epochs]|validate <checkpoint>|test <checkpoint>}"
         exit 1
 esac
