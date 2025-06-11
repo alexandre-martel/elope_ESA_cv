@@ -26,7 +26,7 @@ def main(args):
 
     if args.checkpoint_path:
         print(f"[INFO] Loading checkpoint from {args.checkpoint_path}")
-        model = model.load_from_checkpoint(args.checkpoint_path)
+        model = VelocityLightningModule.load_from_checkpoint(args.checkpoint_path)
 
     logger = TensorBoardLogger(args.output_dir, name="velocity_model")
     print(f"[INFO] Logger initialized, saving to: {logger.log_dir} --------")
