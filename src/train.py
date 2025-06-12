@@ -43,7 +43,8 @@ def main(args):
     trainer = pl.Trainer(
         max_epochs=args.epochs,
         logger=logger,
-        accelerator="gpu" if torch.cuda.is_available() else "cpu",
+        #accelerator="gpu" if torch.cuda.is_available() else "cpu",
+        devices=1 if torch.cuda.is_available() else None,
         default_root_dir=args.output_dir,
         callbacks=[checkpoint_callback],
         
