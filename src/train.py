@@ -19,7 +19,7 @@ def main(args):
     # Load training data
     dataset = EventVelocityDataset(args.folder_path)
 
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=(args.mode=="train"), num_workers=8, pin_memory=True)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=(args.mode=="train"), num_workers=0, pin_memory=True)
     
     model = VelocityLightningModule(use_range=args.use_range)
     print(f"[INFO] Model initialized, use_range: {args.use_range} --------")
