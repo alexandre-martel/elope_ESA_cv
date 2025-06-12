@@ -43,6 +43,6 @@ def events_to_voxel_grid(events, shape=(200, 200), bins=5, device='cpu'):
     return voxel
 
 def get_closest_range(rangemeter: torch.Tensor, t_query: float) -> torch.Tensor:
-    t_query_tensor = torch.tensor(t_query, dtype=torch.float32, device=rangemeter.device)
+    t_query_tensor = t_query.clone().detach()
     idx = torch.argmin(torch.abs(rangemeter[:, 0] - t_query_tensor))
     return rangemeter[idx, 1]
