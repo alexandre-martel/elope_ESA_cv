@@ -17,7 +17,7 @@ def main(args):
 
     os.makedirs(args.output_dir, exist_ok=True)
     # Load training data
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cpu'
     dataset = EventVelocityDataset(args.folder_path, device=device)
 
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=(args.mode=="train"), num_workers=16, pin_memory=False)
