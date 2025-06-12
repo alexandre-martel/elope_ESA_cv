@@ -57,7 +57,7 @@ class VelocityLightningModule(pl.LightningModule):
         voxels, ranges, velocities = batch
         preds = self(voxels, ranges)
         loss = self.criterion(preds, velocities)
-        self.log("train_loss", loss)
+        self.log("train_loss", loss,  on_epoch=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
