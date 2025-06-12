@@ -19,8 +19,10 @@ def main(args):
     # Load training data
     device = 'cpu'
     dataset = EventVelocityDataset(args.folder_path, device=device)
+    dataset_validate = EventVelocityDataset("elope_dataset/validation", device=device)
 
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=(args.mode=="train"), num_workers=16, pin_memory=False)
+    dataloader_validate = DataLoader(dataset_validate, batch_size=args.batch_size, shuffle=False, num_workers=16, pin_memory=False)
     
     model = VelocityLightningModule(use_range=args.use_range)
     print(f"[INFO] Model initialized, use_range: {args.use_range} --------")
@@ -57,7 +59,7 @@ def main(args):
 
     
     if args.mode == "train":
-        trainer.fit(model, dataloader, ckpt_path=args.resume_from_checkpoint if args.resume_from_checkpoint else None)
+        trainer.fit(model, dataloader, val_dataloaders = [dataloader_validate], ckpt_path=args.resume_from_checkpoint if args.resume_from_checkpoint else None)
     elif args.mode == "validate":
         trainer.validate(model, dataloaders=dataloader)
     elif args.mode == "test":
