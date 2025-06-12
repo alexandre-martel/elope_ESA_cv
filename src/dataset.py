@@ -61,7 +61,6 @@ class EventVelocityDataset(Dataset):
 
         t_center = seq["ts_us"][ts_idx]
 
-        print(type(seq), type(seq["ts_us"]), type(t_center))
         t_start = t_center - self.window_size * 1000
         t_end = t_center + self.window_size * 1000
 

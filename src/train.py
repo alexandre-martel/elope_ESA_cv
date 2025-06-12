@@ -43,10 +43,10 @@ def main(args):
     )
 
     trainer = pl.Trainer(
-        profiler="advanced",
+        #profiler="advanced",
         max_epochs=args.epochs,
         logger=logger,
-        max_steps=20,
+        
         #accelerator="gpu" if torch.cuda.is_available() else "cpu",
         devices=1 if torch.cuda.is_available() else None,
         default_root_dir=args.output_dir,
