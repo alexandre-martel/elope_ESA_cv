@@ -20,7 +20,7 @@ def main(args):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     dataset = EventVelocityDataset(args.folder_path, device=device)
 
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=(args.mode=="train"), num_workers=0, pin_memory=True)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=(args.mode=="train"), num_workers=0, pin_memory=False)
     
     model = VelocityLightningModule(use_range=args.use_range)
     print(f"[INFO] Model initialized, use_range: {args.use_range} --------")
