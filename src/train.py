@@ -37,14 +37,17 @@ def main(args):
         filename="epoch-{epoch:02d}",
         save_top_k=1,  # Keep only the last checkpoint (highest epoch)
         every_n_epochs=5,
+        
         verbose=True,
     )
 
     trainer = pl.Trainer(
+        profiler="advanced",
         max_epochs=args.epochs,
         logger=logger,
+        max_steps=20,
         #accelerator="gpu" if torch.cuda.is_available() else "cpu",
-        devices=2 if torch.cuda.is_available() else None,
+        devices=1 if torch.cuda.is_available() else None,
         default_root_dir=args.output_dir,
         callbacks=[checkpoint_callback],
         
