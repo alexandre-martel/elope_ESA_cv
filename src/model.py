@@ -3,7 +3,7 @@ import torch.nn as nn
 import pytorch_lightning as pl
 
 class FlowEncoder(nn.Module):
-    def __init__(self, in_channels=1):
+    def __init__(self, in_channels=2):
         super().__init__()
         self.enc = nn.Sequential(
             nn.Conv2d(in_channels, 32, 3, padding=1), nn.ReLU(),
@@ -24,7 +24,7 @@ class FlowEncoder(nn.Module):
 class VelocityFromFlow(nn.Module):
     def __init__(self, use_range=True):
         super().__init__()
-        self.backbone = FlowEncoder(in_channels=1)
+        self.backbone = FlowEncoder(in_channels=2)
         self.use_range = use_range
         self.mlp = nn.Sequential(
             nn.Linear(2 + (1 if use_range else 0), 64), nn.ReLU(),

@@ -3,64 +3,65 @@ import numpy as np
 import torch
 import time
 from torch.utils.data import Dataset
+import matplotlib.pyplot as plt
 
-def events_to_voxel_grid(events, shape=(200, 200), bins=5, device='cpu'):
+def events_to_image(events, shape):
     """
-    Convert event stream to voxel grid using PyTorch (GPU-compatible, no loops).
-
-    Args:
-        events: torch.Tensor (N, 4) with columns (x, y, p, t)
-        shape: tuple (H, W)
-        bins: number of temporal bins
-        device: 'cpu' or 'cuda'
-
-    Returns:
-        voxel: torch.Tensor of shape (bins, H, W)
+    Crée une image en niveaux de gris à partir des événements.
+    Accumule séparément les polarités +1 / -1, puis normalise.
     """
-    H, W = shape
-    events = events.to(device)
+    if events.numel() == 0:
+        return torch.zeros(shape, dtype=torch.float32, device=events.device)
 
     x = events[:, 0].long()
     y = events[:, 1].long()
-    p = events[:, 2].float()
-    t = events[:, 3].float()
+    p = events[:, 2]
 
-    mask = (x >= 0) & (x < W) & (y >= 0) & (y < H)
-    x, y, p, t = x[mask], y[mask], p[mask], t[mask]
+    x = torch.clamp(x, 0, shape[1] - 1)
+    y = torch.clamp(y, 0, shape[0] - 1)
 
-    t_min = torch.min(t)
-    t_max = torch.max(t)
-    dt = (t_max - t_min) / bins if t_max > t_min else torch.tensor(1.0, device=device)
-    b = ((t - t_min) / dt).floor().long().clamp(max=bins - 1)
+    pos_mask = (p > 0)
+    neg_mask = ~pos_mask
 
-    polarity = torch.where(p > 0, torch.tensor(1.0, device=device), torch.tensor(-1.0, device=device))
-    voxel = torch.zeros((bins, H, W), dtype=torch.float32, device=device)
+    # Indices plats pour accumulation
+    indices_pos = y[pos_mask] * shape[1] + x[pos_mask]
+    indices_neg = y[neg_mask] * shape[1] + x[neg_mask]
 
-    indices = b * (H * W) + y * W + x
-    updates = polarity
+    img_pos = torch.zeros(shape[0] * shape[1], dtype=torch.float32, device=events.device)
+    img_neg = torch.zeros_like(img_pos)
 
-    voxel = voxel.view(-1)
-    voxel.index_add_(0, indices, updates)
-    voxel = voxel.view(bins, H, W)
+    img_pos.index_add_(0, indices_pos, torch.ones_like(indices_pos, dtype=torch.float32))
+    img_neg.index_add_(0, indices_neg, torch.ones_like(indices_neg, dtype=torch.float32))
 
-    return voxel
+    img_pos = img_pos.view(shape)
+    img_neg = img_neg.view(shape)
 
-def get_closest_range(rangemeter: torch.Tensor, t_query: float) -> torch.Tensor:
-    t_query_tensor = torch.tensor(t_query, dtype=torch.float32, device=rangemeter.device)
-    idx = torch.argmin(torch.abs(rangemeter[:, 0] - t_query_tensor))
-    return rangemeter[idx, 1]
+    # Fusion avec normalisation simple : [0, 1] float image
+    img = img_pos - img_neg
+    img = img - img.min()
+    img = img / (img.max() + 1e-6)  # Évite la division par zéro
+
+    return img
+
+def get_closest_range(range_meter, target_ts):
+    """
+    Trouve la valeur de range la plus proche temporellement de target_ts (en secondes), vectorisé.
+    """
+    idx = torch.argmin(torch.abs(range_meter[:, 0] - target_ts))
+    return range_meter[idx, 1]
+
 
 class EventVelocityDataset(Dataset):
-    def __init__(self, folder_path, shape=(200, 200), bins=5, window_size=200, device='cpu'):
+    def __init__(self, folder_path, shape=(200, 200), window_duration_ms=1000, n_windows=200, device='cpu'):
     
         self.shape = shape
-        self.bins = bins
-        self.window_size = window_size  # 200 events before/after
+        self.window_duration_us = window_duration_ms * 1000
+        self.n_windows = n_windows
         self.samples = []
         self.device = device
         self.sequences = []
 
-        npz_files = sorted([f for f in os.listdir(folder_path)])
+        npz_files = sorted([f for f in os.listdir(folder_path) if f.endswith('.npz')])
 
         for file_idx, file_name in enumerate(npz_files):
             path = os.path.join(folder_path, file_name)
@@ -90,9 +91,23 @@ class EventVelocityDataset(Dataset):
                 "range_meter": range_meter,
             })
 
-            for ts_idx in range(len(ts_us)):
-                for bin_idx in range(bins):
-                    self.samples.append((file_idx, ts_idx, bin_idx))
+            t_min = event_times[0].item()
+            t_max = event_times[-1].item()
+            total_duration = t_max - t_min
+
+            max_possible = total_duration - self.window_duration_us
+            if max_possible <= 0 or n_windows <= 0:
+                continue 
+
+            stride_us = max_possible / (n_windows - 1) if n_windows > 1 else 0
+
+            for i in range(n_windows):
+                t_start = t_min + i * stride_us
+                t_end = t_start + self.window_duration_us
+                if t_end <= t_max:
+                    self.samples.append((file_idx, t_start, t_end))
+
+
 
     def __len__(self):
         return len(self.samples)
@@ -101,35 +116,53 @@ class EventVelocityDataset(Dataset):
 
         start_time = time.time()
 
-        seq_idx, ts_idx, bin_idx = self.samples[index]
-
-        
+        seq_idx, t_start, t_end = self.samples[index]
         seq = self.sequences[seq_idx]
-
-        t_center = seq["ts_us"][ts_idx]
-
-        print(type(seq), type(seq["ts_us"]), type(t_center))
-        t_start = t_center - self.window_size * 1000
-        t_end = t_center + self.window_size * 1000
 
         mask = (seq["event_times"] >= t_start) & (seq["event_times"] <= t_end)
         events_slice = seq["events"][mask]
 
-        if len(events_slice) == 0:
-            voxel = torch.zeros((self.bins, *self.shape), dtype=torch.float32, device=self.device)
+        # --- Nouveau traitement pour 2 canaux (pos/neg) ---
+        if events_slice.numel() == 0:
+            image = torch.zeros((2, *self.shape), dtype=torch.float32, device=self.device)
         else:
-            voxel = events_to_voxel_grid(events_slice.to(self.device), shape=self.shape, bins=self.bins, device=self.device)
+            x = events_slice[:, 0].long().clamp(0, self.shape[1] - 1)
+            y = events_slice[:, 1].long().clamp(0, self.shape[0] - 1)
+            p = events_slice[:, 2]
 
-        bin_image = voxel[bin_idx]
-        velocity = seq["traj"][ts_idx, 3:6].to(self.device)
-        ts = seq["timestamps"][ts_idx]
-        range_val = get_closest_range(seq["range_meter"], ts)
+            pos_mask = (p > 0)
+            neg_mask = ~pos_mask
+
+            img_pos = torch.zeros(self.shape[0] * self.shape[1], dtype=torch.float32, device=self.device)
+            img_neg = torch.zeros_like(img_pos)
+
+            indices_pos = y[pos_mask] * self.shape[1] + x[pos_mask]
+            indices_neg = y[neg_mask] * self.shape[1] + x[neg_mask]
+
+            img_pos.index_add_(0, indices_pos, torch.ones_like(indices_pos, dtype=torch.float32))
+            img_neg.index_add_(0, indices_neg, torch.ones_like(indices_neg, dtype=torch.float32))
+
+            img_pos = img_pos.view(self.shape)
+            img_neg = img_neg.view(self.shape)
+
+            image = torch.stack([img_pos, img_neg], dim=0)  # shape (2, H, W)
+
+        # Moyenne des 2 vitesses les plus proches du centre temporel
+        t_center = (t_start + t_end) / 2.0 / 1e6  # en secondes
+        timestamps = seq["timestamps"]
+        traj = seq["traj"]
+
+        time_diffs = torch.abs(timestamps - t_center)
+        closest_indices = torch.topk(time_diffs, k=2, largest=False).indices
+        velocities = traj[closest_indices, 3:6]
+        velocity_mean = velocities.mean(dim=0).to(self.device)
+
+        range_val = get_closest_range(seq["range_meter"], t_center)
 
         elapsed = time.time() - start_time
         print(f"⏱ Temps d'accès à l'échantillon {index} : {elapsed:.6f} secondes")
 
-        return bin_image.unsqueeze(0), range_val, velocity
-    
+        return image, range_val, velocity_mean
 
 if __name__ == "__main__":
 
@@ -144,9 +177,24 @@ if __name__ == "__main__":
     image, range_val, velocity = dataset[index]
 
     print(f"\n✅ Donnée extraite :")
-    print(f" - Image shape : {image.shape}")
+    print(f" - Image shape : {image.shape}")  # (2, H, W)
     print(f" - Range       : {range_val.item():.2f} m")
     print(f" - Velocity    : {velocity.numpy()}")
+
+    img_np = image.cpu().numpy()
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+    axes[0].imshow(img_np[0], cmap='gray', vmin=0)
+    axes[0].set_title('Canal Positif')
+    axes[0].axis('off')
+
+    axes[1].imshow(img_np[1], cmap='gray', vmin=0)
+    axes[1].set_title('Canal Négatif')
+    axes[1].axis('off')
+
+    plt.suptitle(f"Image événements - Range: {range_val.item():.2f} m")
+    plt.show()
+
 
   
 """
