@@ -52,8 +52,8 @@ def get_closest_range(range_meter, target_ts):
 
 
 class EventVelocityDataset(Dataset):
-    def __init__(self, folder_path, shape=(200, 200), window_duration_ms=1000, n_windows=200, device='cpu'):
-    
+    def __init__(self, folder_path, shape=(200, 200), window_duration_ms=400, n_windows=200, device='cpu'):
+
         self.shape = shape
         self.window_duration_us = window_duration_ms * 1000
         self.n_windows = n_windows
