@@ -77,11 +77,18 @@ def main(args):
         model.freeze()
 
         all_preds = []
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = model.to(device)
+
         with torch.no_grad():
             for batch in dataloader_test:
                 voxels, ranges, _ = batch
-                preds = model(voxels, ranges)  # (B, 3)
+                voxels = voxels.to(device)
+                ranges = ranges.to(device)
+
+                preds = model(voxels, ranges)  # plus d’erreur ici
                 all_preds.append(preds.cpu())
+
 
         # Concaténer tous les batches en un seul tensor (N, 3)
         all_preds = torch.cat(all_preds, dim=0)  # (N, 3)
