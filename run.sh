@@ -85,13 +85,29 @@ function validate() {
 }
 
 function test() {
-    if [ -z "$1" ]; then
-        echo "Error: Please provide checkpoint path for testing"
-        exit 1
+    local CHECKPOINT_PATH="$1"
+
+    if [ -z "$CHECKPOINT_PATH" ]; then
+        echo "[INFO] No checkpoint path provided — using latest checkpoint in outputs/train/checkpoints/..."
+        CHECKPOINT_PATH=$(ls -t "$OUTPUT_DIR/train/checkpoints"/epoch-*.ckpt 2>/dev/null | head -n 1)
+
+        if [ -z "$CHECKPOINT_PATH" ]; then
+            echo "Error: No checkpoint found in outputs/train/checkpoints/"
+            exit 1
+        fi
     fi
-    echo "Starting test with checkpoint $1 ..."
-    python "$PYTHON_SCRIPT" --mode test --folder_path "$DEFAULT_DATA_DIR/test" --checkpoint_path "$1" --batch_size 16 --use_range --output_dir "$OUTPUT_DIR/test"
+
+    echo "Starting test with checkpoint: $CHECKPOINT_PATH"
+    python "$PYTHON_SCRIPT" \
+        --mode test \
+        --folder_path "$DEFAULT_DATA_DIR/test" \
+        --checkpoint_path "$CHECKPOINT_PATH" \
+        --batch_size 16 \
+        --use_range \
+        --output_dir "$OUTPUT_DIR/test"
 }
+
+
 
 
 
