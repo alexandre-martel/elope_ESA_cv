@@ -21,8 +21,8 @@ def main(args):
     dataset = EventVelocityDataset(args.folder_path, device=device)
     dataset_validate = EventVelocityDataset("elope_dataset/validation", device=device)
 
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=(args.mode=="train"), num_workers=16, pin_memory=False)
-    dataloader_validate = DataLoader(dataset_validate, batch_size=args.batch_size, shuffle=False, num_workers=16, pin_memory=False)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=(args.mode=="train"), num_workers=2, pin_memory=False)
+    dataloader_validate = DataLoader(dataset_validate, batch_size=args.batch_size, shuffle=False, num_workers=2, pin_memory=False)
     
     model = VelocityLightningModule(use_range=args.use_range)
     print(f"[INFO] Model initialized, use_range: {args.use_range} --------")
