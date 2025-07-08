@@ -80,7 +80,7 @@ class VelocityFromFlow(nn.Module):
 class VelocityLightningModule(pl.LightningModule):
     def __init__(self, use_range=True, lr=1e-3):
         super().__init__()
-        self.model = VelocityFromFlow(use_range=use_range)
+        self.model = VelocityFromEvents(use_range=use_range)
         self.criterion = nn.MSELoss()
         self.lr = lr
         self.use_range = use_range
