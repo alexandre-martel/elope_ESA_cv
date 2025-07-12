@@ -5,6 +5,17 @@ import time
 from torch.utils.data import Dataset
 import matplotlib.pyplot as plt
 
+
+def get_two_event_images(seq, t_start, t_mid, t_end, shape, device):
+    def events_to_image_window(events, t0, t1):
+        mask = (events[:, 3] >= t0) & (events[:, 3] < t1)
+        return events_to_image(events[mask], shape)
+
+    image1 = events_to_image_window(seq["events"], t_start, t_mid).unsqueeze(0).to(device)  # (1, H, W)
+    image2 = events_to_image_window(seq["events"], t_mid, t_end).unsqueeze(0).to(device)
+
+    return image1, image2
+
 def events_to_image(events, shape):
     """
     Crée une image en niveaux de gris à partir des événements.
