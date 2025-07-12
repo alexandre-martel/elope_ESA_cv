@@ -20,9 +20,11 @@ def main(args):
     device = 'cpu'
     dataset = EventVelocityDataset(args.folder_path, device=device)
     dataset_validate = EventVelocityDataset("elope_dataset/validation", device=device)
+    dataset_test = EventVelocityDataset("elope_dataset/test", device=device)
 
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=(args.mode=="train"), num_workers=16, pin_memory=False)
-    dataloader_validate = DataLoader(dataset_validate, batch_size=args.batch_size, shuffle=False, num_workers=16, pin_memory=False)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=(args.mode=="train"), num_workers=2, pin_memory=False)
+    dataloader_validate = DataLoader(dataset_validate, batch_size=args.batch_size, shuffle=False, num_workers=2, pin_memory=False)
+    dataloader_test = DataLoader(dataset_test, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=False)
     
     model = VelocityLightningModule(use_range=args.use_range)
     print(f"[INFO] Model initialized, use_range: {args.use_range} --------")
@@ -63,8 +65,53 @@ def main(args):
     elif args.mode == "validate":
         trainer.validate(model, dataloaders=dataloader)
     elif args.mode == "test":
-        results = trainer.test(model, dataloaders=dataloader)
-        print("Test results:", results)
+        print("[INFO] Running test inference and saving predictions...")
+
+        if args.checkpoint_path:
+            print(f"[INFO] Loading checkpoint from {args.checkpoint_path}")
+            model = VelocityLightningModule.load_from_checkpoint(args.checkpoint_path)
+        else:
+            raise ValueError("In test mode, --checkpoint_path must be provided.")
+
+        model.eval()
+        model.freeze()
+
+        all_preds = []
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = model.to(device)
+
+        with torch.no_grad():
+            for batch in dataloader_test:
+                voxels, ranges, _ = batch
+                voxels = voxels.to(device)
+                ranges = ranges.to(device)
+
+                preds = model(voxels, ranges)  # plus d’erreur ici
+                all_preds.append(preds.cpu())
+
+
+        # Concaténer tous les batches en un seul tensor (N, 3)
+        all_preds = torch.cat(all_preds, dim=0)  # (N, 3)
+        vx_list = all_preds[:, 0].tolist()
+        vy_list = all_preds[:, 1].tolist()
+        vz_list = all_preds[:, 2].tolist()
+
+        # Générer un dictionnaire { "idx": {vx, vy, vz} }
+        predictions = {
+            str(i): {
+                "vx": [vx_list[i]],
+                "vy": [vy_list[i]],
+                "vz": [vz_list[i]],
+            }
+            for i in range(len(vx_list))
+        }
+
+        output_path = os.path.join(args.output_dir, "test_predictions.json")
+        with open(output_path, "w") as f:
+            import json
+            json.dump(predictions, f, indent=2)
+
+        print(f"[INFO] Predictions saved to: {output_path}")
     else:
         raise ValueError(f"Unknown mode: {args.mode}")
 

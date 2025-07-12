@@ -2,8 +2,43 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 
+
+class EventEncoder(nn.Module):
+    def __init__(self, in_channels=4):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Conv2d(in_channels, 32, kernel_size=3, stride=2, padding=1), nn.ReLU(),  # H/2
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1), nn.ReLU(),  # H/4
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1), nn.ReLU(),  # H/8
+            nn.AdaptiveAvgPool2d((1, 1))  # Global pooling -> (B, 128, 1, 1)
+        )
+
+    def forward(self, x):
+        x = self.encoder(x)
+        return x.view(x.size(0), -1)  # (B, 128)
+
+
+class VelocityFromEvents(nn.Module):
+    def __init__(self, use_range=True):
+        super().__init__()
+        self.backbone = EventEncoder(in_channels=4)
+        self.use_range = use_range
+        in_dim = 128 + (1 if use_range else 0)
+        self.mlp = nn.Sequential(
+            nn.Linear(in_dim, 64), nn.ReLU(),
+            nn.Linear(64, 3)  # vx, vy, vz
+        )
+
+    def forward(self, voxel_grid, range_value=None):
+        features = self.backbone(voxel_grid)
+        if self.use_range:
+            features = torch.cat([features, range_value.view(-1, 1)], dim=1)
+        return self.mlp(features)
+
+
+
 class FlowEncoder(nn.Module):
-    def __init__(self, in_channels=1):
+    def __init__(self, in_channels=2):
         super().__init__()
         self.enc = nn.Sequential(
             nn.Conv2d(in_channels, 32, 3, padding=1), nn.ReLU(),
@@ -24,7 +59,7 @@ class FlowEncoder(nn.Module):
 class VelocityFromFlow(nn.Module):
     def __init__(self, use_range=True):
         super().__init__()
-        self.backbone = FlowEncoder(in_channels=1)
+        self.backbone = FlowEncoder(in_channels=2)
         self.use_range = use_range
         self.mlp = nn.Sequential(
             nn.Linear(2 + (1 if use_range else 0), 64), nn.ReLU(),
@@ -45,7 +80,7 @@ class VelocityFromFlow(nn.Module):
 class VelocityLightningModule(pl.LightningModule):
     def __init__(self, use_range=True, lr=1e-3):
         super().__init__()
-        self.model = VelocityFromFlow(use_range=use_range)
+        self.model = VelocityFromEvents(use_range=use_range)
         self.criterion = nn.MSELoss()
         self.lr = lr
         self.use_range = use_range

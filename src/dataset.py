@@ -2,19 +2,19 @@ import os
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from utils import events_to_voxel_grid, get_closest_range
+from utils import events_to_image, get_closest_range
 
 class EventVelocityDataset(Dataset):
-    def __init__(self, folder_path, shape=(200, 200), bins=5, window_size=200, device='cpu'):
-    
+    def __init__(self, folder_path, shape=(200, 200), window_duration_ms=400, n_windows=200, device='cpu'):
+
         self.shape = shape
-        self.bins = bins
-        self.window_size = window_size  # 200 events before/after
+        self.window_duration_us = window_duration_ms * 1000
+        self.n_windows = n_windows
         self.samples = []
         self.device = device
         self.sequences = []
 
-        npz_files = sorted([f for f in os.listdir(folder_path)])
+        npz_files = sorted([f for f in os.listdir(folder_path) if f.endswith('.npz')])
 
         for file_idx, file_name in enumerate(npz_files):
             path = os.path.join(folder_path, file_name)
@@ -44,37 +44,138 @@ class EventVelocityDataset(Dataset):
                 "range_meter": range_meter,
             })
 
-            for ts_idx in range(len(ts_us)):
-                for bin_idx in range(bins):
-                    self.samples.append((file_idx, ts_idx, bin_idx))
+            t_min = event_times[0].item()
+            t_max = event_times[-1].item()
+            total_duration = t_max - t_min
+
+            max_possible = total_duration - self.window_duration_us
+            if max_possible <= 0 or n_windows <= 0:
+                continue 
+
+            stride_us = max_possible / (n_windows - 1) if n_windows > 1 else 0
+
+            for i in range(n_windows):
+                t_start = t_min + i * stride_us
+                t_end = t_start + self.window_duration_us
+                if t_end <= t_max:
+                    self.samples.append((file_idx, t_start, t_end))
+
+
 
     def __len__(self):
         return len(self.samples)
-
+    
     def __getitem__(self, index):
 
-
-        seq_idx, ts_idx, bin_idx = self.samples[index]
-
-        
+        seq_idx, t_start, t_end = self.samples[index]
         seq = self.sequences[seq_idx]
-
-        t_center = seq["ts_us"][ts_idx]
-
-        t_start = t_center - self.window_size * 1000
-        t_end = t_center + self.window_size * 1000
 
         mask = (seq["event_times"] >= t_start) & (seq["event_times"] <= t_end)
         events_slice = seq["events"][mask]
 
-        if len(events_slice) == 0:
-            voxel = torch.zeros((self.bins, *self.shape), dtype=torch.float32, device=self.device)
+        H, W = self.shape
+        image = torch.zeros((4, H, W), dtype=torch.float32, device=self.device)
+
+        if events_slice.shape[0] > 0:
+            x = events_slice[:, 0].long().clamp(0, W - 1)
+            y = events_slice[:, 1].long().clamp(0, H - 1)
+            p = events_slice[:, 2]
+            t = events_slice[:, 3]
+
+            # Flattened indices
+            idx_flat = y * W + x
+
+            # Compte pos/neg
+            pos_mask = (p > 0)
+            neg_mask = ~pos_mask
+
+            # Canaux 0 et 1 : counts
+            img_pos = torch.zeros(H * W, device=self.device)
+            img_neg = torch.zeros(H * W, device=self.device)
+            img_pos.index_add_(0, idx_flat[pos_mask], torch.ones_like(idx_flat[pos_mask], dtype=torch.float32))
+            img_neg.index_add_(0, idx_flat[neg_mask], torch.ones_like(idx_flat[neg_mask], dtype=torch.float32))
+
+            image[0] = img_pos.view(H, W)
+            image[1] = img_neg.view(H, W)
+
+            # Canaux 2 et 3 : max timestamps (pos/neg), normalisés
+            ts_pos = torch.zeros(H * W, device=self.device)
+            ts_neg = torch.zeros(H * W, device=self.device)
+
+            ts_pos.index_put_((idx_flat[pos_mask],), t[pos_mask], accumulate=True)
+            ts_neg.index_put_((idx_flat[neg_mask],), t[neg_mask], accumulate=True)
+
+            ts_pos = ts_pos.view(H, W)
+            ts_neg = ts_neg.view(H, W)
+
+            # Normalisation des timestamps
+            ts_range = (t_end - t_start) + 1e-6
+            ts_pos = (ts_pos - t_start) / ts_range
+            ts_neg = (ts_neg - t_start) / ts_range
+
+            image[2] = ts_pos
+            image[3] = ts_neg
+
+        # Moyenne des 2 vitesses les plus proches du centre temporel
+        t_center = (t_start + t_end) / 2.0 / 1e6  # en secondes
+        timestamps = seq["timestamps"]
+        traj = seq["traj"]
+
+        time_diffs = torch.abs(timestamps - t_center)
+        closest_indices = torch.topk(time_diffs, k=2, largest=False).indices
+        velocities = traj[closest_indices, 3:6]
+        velocity_mean = velocities.mean(dim=0).to(self.device)
+
+        range_val = get_closest_range(seq["range_meter"], t_center)
+
+        return image, range_val, velocity_mean
+
+
+""" def __getitem__(self, index):
+
+        seq_idx, t_start, t_end = self.samples[index]
+        seq = self.sequences[seq_idx]
+
+        mask = (seq["event_times"] >= t_start) & (seq["event_times"] <= t_end)
+        events_slice = seq["events"][mask]
+
+        # --- Nouveau traitement pour 2 canaux (pos/neg) ---
+        if events_slice.numel() == 0:
+            image = torch.zeros((2, *self.shape), dtype=torch.float32, device=self.device)
         else:
-            voxel = events_to_voxel_grid(events_slice.to(self.device), shape=self.shape, bins=self.bins, device=self.device)
+            x = events_slice[:, 0].long().clamp(0, self.shape[1] - 1)
+            y = events_slice[:, 1].long().clamp(0, self.shape[0] - 1)
+            p = events_slice[:, 2]
 
-        bin_image = voxel[bin_idx]
-        velocity = seq["traj"][ts_idx, 3:6].to(self.device)
-        ts = seq["timestamps"][ts_idx]
-        range_val = get_closest_range(seq["range_meter"], ts)
+            pos_mask = (p > 0)
+            neg_mask = ~pos_mask
 
-        return bin_image.unsqueeze(0), range_val, velocity
+            img_pos = torch.zeros(self.shape[0] * self.shape[1], dtype=torch.float32, device=self.device)
+            img_neg = torch.zeros_like(img_pos)
+
+            indices_pos = y[pos_mask] * self.shape[1] + x[pos_mask]
+            indices_neg = y[neg_mask] * self.shape[1] + x[neg_mask]
+
+            img_pos.index_add_(0, indices_pos, torch.ones_like(indices_pos, dtype=torch.float32))
+            img_neg.index_add_(0, indices_neg, torch.ones_like(indices_neg, dtype=torch.float32))
+
+            img_pos = img_pos.view(self.shape)
+            img_neg = img_neg.view(self.shape)
+
+            image = torch.stack([img_pos, img_neg], dim=0)  # shape (2, H, W)
+
+        # Moyenne des 2 vitesses les plus proches du centre temporel
+        t_center = (t_start + t_end) / 2.0 / 1e6  # en secondes
+        timestamps = seq["timestamps"]
+        traj = seq["traj"]
+
+        time_diffs = torch.abs(timestamps - t_center)
+        closest_indices = torch.topk(time_diffs, k=2, largest=False).indices
+        velocities = traj[closest_indices, 3:6]
+        velocity_mean = velocities.mean(dim=0).to(self.device)
+
+        range_val = get_closest_range(seq["range_meter"], t_center)
+
+        
+
+        return image, range_val, velocity_mean"""
